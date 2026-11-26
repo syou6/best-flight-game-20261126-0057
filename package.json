@@ -1,0 +1,6 @@
+{
+  "name": "skyhook-run",
+  "private": true,
+  "type": "module",
+  "description": "Skyhook Run - a pure Canvas 2D courier-pilot flight game"
+}

@@ -1,0 +1,9 @@
+{
+  "viewport": { "width": 1280, "height": 800 },
+  "scenes": [
+    { "name": "1-flight.jpg", "query": "?shot=flight&seed=1" },
+    { "name": "2-ring.jpg", "query": "?shot=ring&seed=1" },
+    { "name": "3-landing.jpg", "query": "?shot=landed&seed=1" },
+    { "name": "4-title.jpg", "query": "?shot=title&seed=1" }
+  ]
+}
