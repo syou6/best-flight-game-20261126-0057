@@ -12,7 +12,7 @@ export function getButtons(screen) {
       { id: 'restart', label: 'RESTART', x: 490, y: 480, w: 300, h: 62 }
     ];
   }
-  if (screen === 'complete') return [{ id: 'restart', label: 'FLY AGAIN', x: 800, y: 600, w: 300, h: 62 }];
+  if (screen === 'complete') return [{ id: 'restart', label: 'FLY AGAIN', x: 916, y: 574, w: 260, h: 62 }];
   if (screen === 'crashed') return [{ id: 'restart', label: 'TRY AGAIN', x: 490, y: 520, w: 300, h: 62 }];
   return [];
 }
@@ -97,11 +97,11 @@ export function drawTitle(ctx, g, mouse) {
   ctx.fillStyle = top;
   ctx.fillRect(0, 0, 1280, 330);
   bigTitle(ctx, 'SKYHOOK RUN', 640, 138, 118, '#ffffff', '#ffc23a');
-  text(ctx, 'COURIER PILOT  ·  6 GOLD RINGS  ·  1 RUNWAY', 640, 190, 26, '#e6f6ff', 'center', false);
+  text(ctx, 'COURIER PILOT  ·  6 GOLD RINGS  ·  5 STARS  ·  1 RUNWAY', 640, 190, 26, '#e6f6ff', 'center', false);
 
   // controls panel
-  roundRect(ctx, 44, 262, 400, 330, 14);
-  ctx.fillStyle = 'rgba(6,14,28,0.7)';
+  roundRect(ctx, 44, 262, 380, 316, 14);
+  ctx.fillStyle = 'rgba(6,14,28,0.56)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(110,200,255,0.6)';
   ctx.lineWidth = 2;
@@ -122,23 +122,23 @@ export function drawTitle(ctx, g, mouse) {
   }
 
   // mission panel
-  roundRect(ctx, 836, 262, 400, 330, 14);
-  ctx.fillStyle = 'rgba(6,14,28,0.7)';
+  roundRect(ctx, 836, 262, 400, 316, 14);
+  ctx.fillStyle = 'rgba(6,14,28,0.56)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(110,200,255,0.6)';
   ctx.stroke();
   text(ctx, 'MISSION', 860, 300, 22, '#8fdcff', 'left', false);
   const lines = [
     'Fly through the 6 gold rings in order.',
-    'Each ring refuels you a little.',
+    'Chain rings for a x1.25 / x1.5 combo.',
+    'Grab the 5 gold stars: +150 each.',
     'Then land on the runway: wings level,',
     'nose straight, gentle sink rate.',
-    '',
-    'Score = rings + time + landing + fuel.',
-    'Watch speed: below 62 kt you stall.'
+    'Score = rings+stars+time+landing+fuel.',
+    'Rings refuel you. Below 62 kt you stall.'
   ];
   for (let i = 0; i < lines.length; i++) text(ctx, lines[i], 860, 338 + i * 30, 17, '#eaf6ff', 'left', false);
-  if (g.best > 0) text(ctx, 'BEST SCORE  ' + g.best, 860, 566, 18, '#ffd23a', 'left', true);
+  if (g.best > 0) text(ctx, 'BEST SCORE  ' + g.best, 860, 556, 18, '#ffd23a', 'left', true);
 
   drawButtons(ctx, 'title', mouse, g.clock);
   text(ctx, 'or press ENTER', 640, 766, 16, 'rgba(235,248,255,0.8)', 'center', false);
@@ -158,11 +158,12 @@ function row(ctx, label, value, x, y, w, color) {
 
 export function drawComplete(ctx, g, mouse) {
   const r = g.result;
-  const x = 720;
-  const y = 70;
-  const w = 500;
-  const h = 610;
-  ctx.fillStyle = 'rgba(4,10,24,0.34)';
+  // narrow panel anchored right, so the runway and the aircraft stay visible on the left
+  const x = 826;
+  const y = 60;
+  const w = 440;
+  const h = 600;
+  ctx.fillStyle = 'rgba(4,10,24,0.2)';
   ctx.fillRect(0, 0, 1280, 800);
   roundRect(ctx, x, y, w, h, 18);
   ctx.fillStyle = 'rgba(6,16,32,0.86)';
@@ -170,39 +171,41 @@ export function drawComplete(ctx, g, mouse) {
   ctx.lineWidth = 3;
   ctx.strokeStyle = 'rgba(120,255,190,0.8)';
   ctx.stroke();
-  bigTitle(ctx, 'MISSION COMPLETE', x + w / 2, y + 74, 52, '#eafff4', '#58f0a0');
-  text(ctx, 'Package delivered. Smooth landing, pilot.', x + w / 2, y + 108, 18, '#cfeee0', 'center', false);
+  bigTitle(ctx, 'MISSION COMPLETE', x + w / 2, y + 66, 36, '#eafff4', '#58f0a0');
+  text(ctx, 'Package delivered. Smooth landing, pilot.', x + w / 2, y + 98, 17, '#cfeee0', 'center', false);
 
   // grade badge
   ctx.beginPath();
-  ctx.arc(x + 86, y + 190, 52, 0, Math.PI * 2);
+  ctx.arc(x + 72, y + 176, 46, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255,200,60,0.18)';
   ctx.fill();
   ctx.lineWidth = 5;
   ctx.strokeStyle = '#ffd23a';
   ctx.stroke();
-  text(ctx, r.grade, x + 86, y + 212, 64, '#ffd23a', 'center', false);
-  text(ctx, 'GRADE', x + 86, y + 262, 13, '#9fb8c8', 'center', false);
+  text(ctx, r.grade, x + 72, y + 197, 56, '#ffd23a', 'center', false);
+  text(ctx, 'GRADE', x + 72, y + 244, 13, '#9fb8c8', 'center', false);
 
-  const rx = x + 170;
-  const rw = w - 170 - 32;
-  row(ctx, 'Rings ' + r.rings + '/6', '+' + r.ringScore, rx, y + 160, rw);
-  row(ctx, 'Time ' + fmtTime(r.time), '+' + r.timeBonus, rx, y + 194, rw);
-  row(ctx, 'Landing', '+' + r.landing, rx, y + 228, rw);
-  row(ctx, 'Fuel left ' + Math.round(r.fuel) + '%', '+' + r.fuelBonus, rx, y + 262, rw);
+  const rx = x + 148;
+  const rw = w - 148 - 28;
+  row(ctx, 'Rings ' + r.rings + '/6', '+' + r.ringScore, rx, y + 146, rw);
+  row(ctx, 'Stars ' + r.stars + '/5', '+' + r.starScore, rx, y + 176, rw);
+  row(ctx, 'Time ' + fmtTime(r.time), '+' + r.timeBonus, rx, y + 206, rw);
+  row(ctx, 'Landing', '+' + r.landing, rx, y + 236, rw);
+  row(ctx, 'Fuel left ' + Math.round(r.fuel) + '%', '+' + r.fuelBonus, rx, y + 266, rw);
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(x + 36, y + 300);
-  ctx.lineTo(x + w - 36, y + 300);
+  ctx.moveTo(x + 30, y + 288);
+  ctx.lineTo(x + w - 30, y + 288);
   ctx.stroke();
-  text(ctx, 'TOTAL SCORE', x + 36, y + 352, 22, '#8fdcff', 'left', false);
-  text(ctx, String(r.total), x + w - 36, y + 356, 54, '#ffffff', 'right', true);
-  if (r.newBest) text(ctx, 'NEW BEST!', x + w - 36, y + 386, 20, '#ffd23a', 'right', true);
+  text(ctx, 'TOTAL SCORE', x + 30, y + 334, 20, '#8fdcff', 'left', false);
+  text(ctx, String(r.total), x + w - 30, y + 338, 48, '#ffffff', 'right', true);
+  if (r.newBest) text(ctx, 'NEW BEST!', x + w - 30, y + 368, 20, '#ffd23a', 'right', true);
 
-  text(ctx, 'TOUCHDOWN', x + 36, y + 430, 14, '#8fdcff', 'left', false);
-  text(ctx, 'Sink rate ' + r.sinkFpm + ' fpm   ·   ' + r.touchKt + ' kt   ·   ' + Math.abs(Math.round(r.offset)) + ' ft off centreline', x + 36, y + 456, 16, '#dff3ff', 'left', false);
-  text(ctx, 'Seed ' + g.seed + '   ·   press R or ENTER to fly again', x + 36, y + 484, 15, '#9fb8c8', 'left', false);
+  text(ctx, 'TOUCHDOWN', x + 30, y + 410, 14, '#8fdcff', 'left', false);
+  text(ctx, 'Sink rate ' + r.sinkFpm + ' fpm   ·   ' + r.touchKt + ' kt', x + 30, y + 436, 16, '#dff3ff', 'left', false);
+  text(ctx, Math.abs(Math.round(r.offset)) + ' ft off centreline', x + 30, y + 460, 16, '#dff3ff', 'left', false);
+  text(ctx, 'Seed ' + g.seed + '  ·  press R or ENTER to fly again', x + 30, y + 490, 14, '#9fb8c8', 'left', false);
   drawButtons(ctx, 'complete', mouse, g.clock);
 }
 

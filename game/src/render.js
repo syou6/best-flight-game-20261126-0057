@@ -17,13 +17,15 @@ const HB = 267; // buffer rows above the horizon
 const BH = 567; // buffer rows in total
 const FB = FOCAL / BS;
 const MAXF = 12000;
-const CAM_BACK = 130;
-const CAM_UP = 34;
-const FOG_R = 200;
-const FOG_G = 224;
-const FOG_B = 240;
-const SUN_AZ = 0.75;
-const SUN_EL = 0.5;
+const CAM_BACK = 105;
+const CAM_UP = 21;
+const PLANE_K = 1.35; // chase-view sprite scale
+const PLANE_Y = 514; // sprite centre on screen; its tail stays above the bottom HUD (y 640+)
+const FOG_R = 214;
+const FOG_G = 226;
+const FOG_B = 236;
+const SUN_AZ = 0.25;
+const SUN_EL = 0.2;
 
 // march distances and fog, shared by every column
 const FS = [];
@@ -41,15 +43,17 @@ const NS = FS.length;
 const IFB = FS.map(function (f) { return FB / f; });
 
 const CK = 0.2; // cloud sprite scale (sprite px per world unit)
+const SKY_CLIP_Y = 40; // sky drawn only above local y = this (terrain covers the rest)
+const CLOUD_MAX_PX = 480; // max on-screen size (px, longest side) of a drawn cloud sprite
 
 function makeClouds(seed) {
   const rng = mulberry32(seed * 131 + 5);
   const list = [];
-  for (let i = 0; i < 80; i++) {
-    const c = { x: (rng() - 0.5) * 18000, y: 1700 + rng() * 1700, z: 500 + rng() * 47000, puffs: [], f: 0 };
-    const n = 6 + Math.floor(rng() * 4);
+  for (let i = 0; i < 52; i++) {
+    const c = { x: (rng() - 0.5) * 18000, y: 1800 + rng() * 1700, z: 500 + rng() * 47000, puffs: [], f: 0 };
+    const n = 5 + Math.floor(rng() * 3);
     for (let k = 0; k < n; k++) {
-      c.puffs.push({ ox: (rng() - 0.5) * 900, oy: rng() * 150, oz: (rng() - 0.5) * 300, r: 180 + rng() * 260 });
+      c.puffs.push({ ox: (rng() - 0.5) * 1200, oy: rng() * 170, oz: (rng() - 0.5) * 300, r: 260 + rng() * 340 });
     }
     list.push(c);
   }
@@ -69,11 +73,29 @@ function poly(ctx, pts, fill, mirror) {
   ctx.stroke();
 }
 
+// static plane geometry, built once (no per-frame arrays)
+const WING = [[-14, -14], [-126, -10], [-131, 7], [-14, 15]];
+const WING_TIP = [[-112, -11], [-126, -10], [-131, 7], [-114, 8]];
+const FUSE = [[-13, -44], [13, -44], [19, -6], [10, 62], [-10, 62], [-19, -6]];
+const STAB = [[-9, 52], [-58, 57], [-61, 70], [-9, 71]];
+const FIN = [[-5, 68], [5, 68], [3, 8], [-3, 8]];
+const FIN_RED = [[-4.6, 66], [4.6, 66], [3.5, 28], [-3.5, 28]];
+let fuseGrad = null;
+let fuseGradCtx = null;
+
 // Aircraft seen from behind and slightly above, centred on (x, y), banked by `roll`.
 export function drawPlaneSprite(ctx, x, y, roll, throttle, clock, grounded) {
+  if (!fuseGrad || fuseGradCtx !== ctx) {
+    fuseGrad = ctx.createLinearGradient(-19, 0, 19, 0);
+    fuseGrad.addColorStop(0, '#c4701a');
+    fuseGrad.addColorStop(0.5, '#ffb52e');
+    fuseGrad.addColorStop(1, '#c4701a');
+    fuseGradCtx = ctx;
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(roll);
+  ctx.scale(PLANE_K, PLANE_K);
   ctx.lineJoin = 'round';
   ctx.lineWidth = 2.4;
   ctx.strokeStyle = 'rgba(16,22,38,0.92)';
@@ -104,19 +126,13 @@ export function drawPlaneSprite(ctx, x, y, roll, throttle, clock, grounded) {
   }
 
   // wings (far side of the fuselage)
-  const wing = [[-14, -14], [-126, -10], [-131, 7], [-14, 15]];
-  poly(ctx, wing, '#f2ede0', false);
-  poly(ctx, wing, '#f2ede0', true);
-  const tip = [[-112, -11], [-126, -10], [-131, 7], [-114, 8]];
-  poly(ctx, tip, '#d5352f', false);
-  poly(ctx, tip, '#d5352f', true);
+  poly(ctx, WING, '#f2ede0', false);
+  poly(ctx, WING, '#f2ede0', true);
+  poly(ctx, WING_TIP, '#d5352f', false);
+  poly(ctx, WING_TIP, '#d5352f', true);
 
   // fuselage
-  const grad = ctx.createLinearGradient(-19, 0, 19, 0);
-  grad.addColorStop(0, '#c4701a');
-  grad.addColorStop(0.5, '#ffb52e');
-  grad.addColorStop(1, '#c4701a');
-  poly(ctx, [[-13, -44], [13, -44], [19, -6], [10, 62], [-10, 62], [-19, -6]], grad, false);
+  poly(ctx, FUSE, fuseGrad, false);
   ctx.fillStyle = '#cdd5de';
   ctx.beginPath();
   ctx.ellipse(0, -44, 13, 6, 0, 0, Math.PI * 2);
@@ -137,11 +153,10 @@ export function drawPlaneSprite(ctx, x, y, roll, throttle, clock, grounded) {
   ctx.fill();
 
   // tailplane and fin (nearest to the camera)
-  const stab = [[-9, 52], [-58, 57], [-61, 70], [-9, 71]];
-  poly(ctx, stab, '#e9e3d3', false);
-  poly(ctx, stab, '#e9e3d3', true);
-  poly(ctx, [[-5, 68], [5, 68], [3, 8], [-3, 8]], '#f2a516', false);
-  poly(ctx, [[-4.6, 66], [4.6, 66], [3.5, 28], [-3.5, 28]], '#d5352f', false);
+  poly(ctx, STAB, '#e9e3d3', false);
+  poly(ctx, STAB, '#e9e3d3', true);
+  poly(ctx, FIN, '#f2a516', false);
+  poly(ctx, FIN_RED, '#d5352f', false);
   ctx.restore();
 }
 
@@ -179,17 +194,122 @@ export function createRenderer(ctx, world) {
   let terrainValid = false;
   let frameNo = 0;
 
-  const skyGrad = ctx.createLinearGradient(0, -1500, 0, 0);
-  skyGrad.addColorStop(0, '#2c68cf');
-  skyGrad.addColorStop(0.55, '#66aae6');
-  skyGrad.addColorStop(0.9, '#b8dcf3');
-  skyGrad.addColorStop(1, 'rgb(' + FOG_R + ',' + FOG_G + ',' + FOG_B + ')');
-
   const FOG_CSS = 'rgb(' + FOG_R + ',' + FOG_G + ',' + FOG_B + ')';
-  const sunGrad = ctx.createRadialGradient(0, 0, 8, 0, 0, 230);
-  sunGrad.addColorStop(0, 'rgba(255,248,214,0.95)');
-  sunGrad.addColorStop(0.18, 'rgba(255,236,170,0.5)');
-  sunGrad.addColorStop(1, 'rgba(255,236,170,0)');
+  function mk(w, h) {
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    return cv;
+  }
+
+  // ---- static sky, pre-rendered once (see the panorama below) ----
+  const SKY_HALF_W = 790; // half-width needed to cover the 1280x800 screen at any roll
+
+  // Sun glow at half resolution (smooth gradient; baked into the panorama, scaled 2x once).
+  const sunSpr = mk(380, 380);
+  (function () {
+    const g = sunSpr.getContext('2d');
+    const sg = g.createRadialGradient(190, 190, 5, 190, 190, 190);
+    sg.addColorStop(0, 'rgba(255,250,224,1)');
+    sg.addColorStop(0.1, 'rgba(255,240,180,0.8)');
+    sg.addColorStop(0.35, 'rgba(255,224,150,0.32)');
+    sg.addColorStop(1, 'rgba(255,224,150,0)');
+    g.fillStyle = sg;
+    g.fillRect(0, 0, 380, 380);
+  })();
+
+  // Two layers of distant mountain silhouettes, fading into the horizon haze. Each ridge is baked once into a
+  // strip that is exactly one full turn of heading wide (frequencies are whole cycles per turn, so it tiles
+  // seamlessly); per frame only a scrolled slice is blitted. Strip rows map to local y = row - RIDGE_TOP.
+  const RIDGE_TOP = 156;
+  const RIDGE_H = 163; // rows -> y = -156 .. +6
+  function buildRidge(par, base, amp, k, n1, n2, n3, topY, topColor) {
+    const P = 2 * Math.PI * FOCAL * par; // pixels per full turn of heading
+    const W = Math.round(P);
+    const cv = mk(W, RIDGE_H);
+    const g = cv.getContext('2d');
+    const gr = g.createLinearGradient(0, RIDGE_TOP + topY, 0, RIDGE_TOP + 6);
+    gr.addColorStop(0, topColor);
+    gr.addColorStop(1, FOG_CSS);
+    g.fillStyle = gr;
+    g.beginPath();
+    g.moveTo(-4, RIDGE_H);
+    for (let x = -4; x <= W + 4; x += 4) {
+      const th = (x / W) * 2 * Math.PI; // u * freq == th * n for freq = n / (FOCAL * par)
+      const h = base + amp * (0.55 * Math.abs(Math.sin(th * n1 + k)) + 0.3 * Math.abs(Math.sin(th * n2 + 2.1 * k)) + 0.15 * Math.sin(th * n3 + k));
+      g.lineTo(x, RIDGE_TOP - h);
+    }
+    g.lineTo(W + 4, RIDGE_H);
+    g.closePath();
+    g.fill();
+    return { cv: cv, W: W, P: P, par: par };
+  }
+  const ridgeFar = buildRidge(1, 30, 120, 1.7, 4, 11, 28, -150, 'rgb(142,170,214)');
+  const ridgeNear = buildRidge(0.94, 14, 80, 4.1, 4, 10, 27, -110, 'rgb(92,128,180)');
+
+  // ---- sky panorama: gradient + sun glow/disc + far ridge baked into ONE opaque canvas, a full turn wide ----
+  // Panorama x <-> heading (x = heading / 2pi * W), rows map to local y = row - PAN_T. Per frame: one 1:1 slice.
+  const PAN_T = 600; // rows above the horizon
+  const PAN_B = 200; // rows below it
+  const SKY_TOP_CSS = '#0a3490';
+  const panW = ridgeFar.W;
+  const panorama = mk(panW, PAN_T + PAN_B);
+  (function () {
+    const g = panorama.getContext('2d');
+    const sg = g.createLinearGradient(0, PAN_T - 560, 0, PAN_T);
+    sg.addColorStop(0, SKY_TOP_CSS);
+    sg.addColorStop(0.3, '#1c5fc4');
+    sg.addColorStop(0.62, '#4a96de');
+    sg.addColorStop(0.84, '#9ccdf0');
+    sg.addColorStop(0.94, '#f6dfb8');
+    sg.addColorStop(1, FOG_CSS);
+    g.fillStyle = sg;
+    g.fillRect(0, 0, panW, PAN_T + PAN_B);
+    // sun (drawn at three x offsets so its glow wraps across the seam)
+    const sunX = (SUN_AZ / (2 * Math.PI)) * panW;
+    const sunY = PAN_T - FOCAL * Math.tan(SUN_EL);
+    for (let k = -1; k <= 1; k++) {
+      const x = sunX + k * panW;
+      g.drawImage(sunSpr, x - 380, sunY - 380, 760, 760);
+      g.fillStyle = '#fffbe6';
+      g.beginPath();
+      g.arc(x, sunY, 38, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.drawImage(ridgeFar.cv, 0, PAN_T - RIDGE_TOP);
+  })();
+
+  // Blit rows [srcY, srcY+srcH) of a one-turn-wide strip, scrolled by heading, 1:1, to local y = dstY.
+  // Wraps with a second blit at the seam.
+  function blitSlice(g, cv, W, srcY, srcH, dstY) {
+    const sw = SKY_HALF_W * 2;
+    let u0 = Math.round((cam.heading / (2 * Math.PI)) * W - SKY_HALF_W) % W;
+    if (u0 < 0) u0 += W;
+    const first = Math.min(sw, W - u0);
+    g.drawImage(cv, u0, srcY, first, srcH, -SKY_HALF_W, dstY, first, srcH);
+    if (first < sw) {
+      g.drawImage(cv, 0, srcY, sw - first, srcH, -SKY_HALF_W + first, dstY, sw - first, srcH);
+    }
+  }
+
+  // Draws into g, which must already have translate(CX,CY) rotate(-roll) translate(0,shift) applied.
+  function drawSky(g) {
+    const yTop = Math.floor(-cam.shift - 790);
+    // rows below the horizon are fully covered by the terrain layer: clip just under it
+    const yBot = Math.min(Math.ceil(-cam.shift + 790), SKY_CLIP_Y);
+    if (yTop < -PAN_T) {
+      g.fillStyle = SKY_TOP_CSS;
+      g.fillRect(-SKY_HALF_W, yTop, SKY_HALF_W * 2, -PAN_T - yTop);
+    }
+    if (yBot > PAN_B) {
+      g.fillStyle = FOG_CSS;
+      g.fillRect(-SKY_HALF_W, PAN_B, SKY_HALF_W * 2, yBot - PAN_B);
+    }
+    const a = Math.max(yTop, -PAN_T);
+    const b = Math.min(yBot, PAN_B);
+    if (b > a) blitSlice(g, panorama, panW, a + PAN_T, b - a, a);
+    blitSlice(g, ridgeNear.cv, ridgeNear.W, 0, RIDGE_H, -RIDGE_TOP);
+  }
 
   const cam = {
     x: 0, y: 0, z: 0, heading: 0, pitch: 0, roll: 0,
@@ -296,22 +416,6 @@ export function createRenderer(ctx, world) {
     }
   }
 
-  function drawSun() {
-    const da = angDiff(SUN_AZ, cam.heading);
-    if (Math.abs(da) > 1.25) return;
-    const sx = FOCAL * Math.tan(da);
-    const sy = -(FOCAL * Math.tan(SUN_EL)) / Math.cos(da);
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.fillStyle = sunGrad;
-    ctx.fillRect(-240, -240, 480, 480);
-    ctx.fillStyle = '#fffbe6';
-    ctx.beginPath();
-    ctx.arc(0, 0, 34, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
   // Pre-render one cloud (all puffs, same two-tone look) to a small sprite, once. Sprite px = world unit * CK.
   function buildCloudSprite(c) {
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
@@ -333,18 +437,33 @@ export function createRenderer(ctx, world) {
     cv.width = w;
     cv.height = h;
     const g = cv.getContext('2d');
+    // soft radial puffs: a bluish underside layer, then a white body that fades out at its edge
     for (let k = 0; k < c.puffs.length; k++) {
       const pf = c.puffs[k];
       const px = pf.ox * CK - x0;
       const py = -pf.oy * CK - y0;
       const r = pf.r * CK;
-      g.fillStyle = 'rgba(176,196,222,0.9)';
+      const gs = g.createRadialGradient(px, py + r * 0.25, 0, px, py + r * 0.25, r);
+      gs.addColorStop(0, 'rgba(160,184,216,0.8)');
+      gs.addColorStop(0.65, 'rgba(172,194,224,0.45)');
+      gs.addColorStop(1, 'rgba(172,194,224,0)');
+      g.fillStyle = gs;
       g.beginPath();
-      g.arc(px, py + r * 0.28, r, 0, Math.PI * 2);
+      g.arc(px, py + r * 0.25, r, 0, Math.PI * 2);
       g.fill();
-      g.fillStyle = 'rgba(255,255,255,1)';
+    }
+    for (let k = 0; k < c.puffs.length; k++) {
+      const pf = c.puffs[k];
+      const px = pf.ox * CK - x0;
+      const py = -pf.oy * CK - y0;
+      const r = pf.r * CK;
+      const gw = g.createRadialGradient(px, py - r * 0.06, 0, px, py - r * 0.06, r * 0.95);
+      gw.addColorStop(0, 'rgba(255,255,255,0.98)');
+      gw.addColorStop(0.55, 'rgba(255,255,255,0.86)');
+      gw.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gw;
       g.beginPath();
-      g.arc(px, py - r * 0.06, r * 0.94, 0, Math.PI * 2);
+      g.arc(px, py - r * 0.06, r * 0.95, 0, Math.PI * 2);
       g.fill();
     }
     c.spr = cv;
@@ -357,7 +476,8 @@ export function createRenderer(ctx, world) {
 
   function cloudCmp(a, b) { return b.f - a.f; }
 
-  function drawClouds() {
+  // Draws into g with its base (DPR) transform only (screen space).
+  function drawClouds(g) {
     for (let i = 0; i < clouds.length; i++) {
       const c = clouds[i];
       const dx = c.x - cam.x;
@@ -371,42 +491,57 @@ export function createRenderer(ctx, world) {
       const q = project(c.x, c.y, c.z);
       if (!q) continue;
       const sc = FOCAL / q.f; // screen px per world unit
-      const er = c.rad * sc;
+      if (!c.spr) {
+        // cheap pre-cull before building the sprite
+        if (c.rad * sc < 2 || q.x < -c.rad * sc || q.x > SCREEN_W + c.rad * sc || q.y < -c.rad * sc || q.y > SCREEN_H + c.rad * sc) continue;
+        buildCloudSprite(c);
+      }
+      let m = sc / CK;
+      // cap the drawn size (huge near clouds cost a lot of blended pixels and read the same smaller)
+      const big = Math.max(c.sw, c.sh) * m;
+      if (big > CLOUD_MAX_PX) m *= CLOUD_MAX_PX / big;
+      const er = c.rad * CK * m; // on-screen bounding radius of what is actually drawn
       if (er < 2 || q.x < -er || q.x > SCREEN_W + er || q.y < -er || q.y > SCREEN_H + er) continue;
-      if (!c.spr) buildCloudSprite(c);
-      const m = sc / CK;
-      ctx.globalAlpha = clamp(1.15 - c.f / 21000, 0.15, 0.95);
-      ctx.save();
-      ctx.translate(q.x, q.y);
-      ctx.rotate(-cam.roll);
-      ctx.drawImage(c.spr, c.sx0 * m, c.sy0 * m, c.sw * m, c.sh * m);
-      ctx.restore();
+      g.globalAlpha = clamp(1.15 - c.f / 21000, 0.15, 0.95);
+      g.save();
+      g.translate(q.x, q.y);
+      g.rotate(-cam.roll);
+      g.drawImage(c.spr, c.sx0 * m, c.sy0 * m, c.sw * m, c.sh * m);
+      g.restore();
     }
-    ctx.globalAlpha = 1;
+    g.globalAlpha = 1;
   }
 
+  // precomputed unit-circle tables per segment count (no per-frame allocation)
+  const RING_NS = [14, 20, 28];
+  const RCS = {};
+  RING_NS.forEach(function (n) {
+    const c = new Float64Array(n + 1);
+    const s = new Float64Array(n + 1);
+    for (let k = 0; k <= n; k++) {
+      c[k] = Math.cos((k / n) * Math.PI * 2);
+      s[k] = Math.sin((k / n) * Math.PI * 2);
+    }
+    RCS[n] = { c: c, s: s };
+  });
+
+  // Projects the ring outline and builds it as the current canvas path (no intermediate arrays).
+  // Returns true when every point is in front of the camera (closed loop).
   function ringPath(r, N) {
     const rx = Math.cos(r.ang);
     const rz = -Math.sin(r.ang);
-    const pts = [];
-    for (let k = 0; k <= N; k++) {
-      const th = (k / N) * Math.PI * 2;
-      const lx = Math.cos(th) * r.r;
-      const q = project(r.x + rx * lx, r.y + Math.sin(th) * r.r, r.z + rz * lx);
-      pts.push(q ? { x: q.x, y: q.y, f: q.f } : null);
-    }
-    return pts;
-  }
-
-  function strokePts(pts) {
-    ctx.beginPath();
+    const tab = RCS[N];
+    let whole = true;
     let pen = false;
-    for (let i = 0; i < pts.length; i++) {
-      const q = pts[i];
-      if (!q) { pen = false; continue; }
+    ctx.beginPath();
+    for (let k = 0; k <= N; k++) {
+      const lx = tab.c[k] * r.r;
+      const q = project(r.x + rx * lx, r.y + tab.s[k] * r.r, r.z + rz * lx);
+      if (!q) { whole = false; pen = false; continue; }
       if (!pen) { ctx.moveTo(q.x, q.y); pen = true; } else ctx.lineTo(q.x, q.y);
     }
-    ctx.stroke();
+    if (whole) ctx.closePath();
+    return whole;
   }
 
   function drawRings(game, clock) {
@@ -416,38 +551,139 @@ export function createRenderer(ctx, world) {
       if (!c || c.f > 17000) continue;
       const cf = c.f;
       const isNext = i === game.rings;
-      const pts = ringPath(r, 28);
-      const lw = clamp((11 * FOCAL) / cf, 2.2, 28) * (isNext ? 1 + 0.12 * Math.sin(clock * 6) : 0.8);
+      const lw = clamp((19 * FOCAL) / cf, 3.5, 44) * (isNext ? 1 + 0.1 * Math.sin(clock * 6) : 0.8);
       ctx.save();
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'miter';
       if (isNext) {
-        let whole = true;
-        for (let k = 0; k < pts.length; k++) if (!pts[k]) whole = false;
-        if (whole) {
-          ctx.beginPath();
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
-          ctx.closePath();
-          ctx.fillStyle = 'rgba(255,214,70,0.10)';
+        // vertical light beam above the next ring, readable from far away
+        const top = project(r.x, r.y + r.r, r.z);
+        if (top) {
+          const tx = top.x;
+          const ty = top.y;
+          const hi = project(r.x, r.y + r.r + 1800, r.z);
+          if (hi) {
+            ctx.strokeStyle = 'rgba(255,224,90,0.4)';
+            ctx.lineWidth = clamp((26 * FOCAL) / cf, 3, 22);
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(hi.x, hi.y);
+            ctx.stroke();
+          }
+        }
+        // outline is built once and stroked several times
+        const whole = ringPath(r, 28);
+        // interior tint only while the ring is small on screen (a huge translucent fill is pure overdraw)
+        if (whole && (r.r * FOCAL) / cf < 220) {
+          ctx.fillStyle = 'rgba(255,220,90,0.14)';
           ctx.fill();
         }
-        ctx.strokeStyle = 'rgba(255,200,40,0.28)';
-        ctx.lineWidth = lw * 2.4;
-        strokePts(pts);
-        ctx.strokeStyle = '#ffd23a';
+        // one soft halo pass (replaces the two wide glow passes)
+        ctx.strokeStyle = 'rgba(255,200,46,0.2)';
+        ctx.lineWidth = lw * 3;
+        ctx.stroke();
+        ctx.strokeStyle = '#ffd62e';
         ctx.lineWidth = lw;
-        strokePts(pts);
-        ctx.strokeStyle = 'rgba(255,255,230,0.85)';
-        ctx.lineWidth = Math.max(1, lw * 0.28);
-        strokePts(pts);
+        ctx.stroke();
+        ctx.strokeStyle = '#fff0a0';
+        ctx.lineWidth = Math.max(1.5, lw * 0.5);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,248,0.9)';
+        ctx.lineWidth = Math.max(1, lw * 0.18);
+        ctx.stroke();
       } else {
         ctx.globalAlpha = clamp(1.1 - cf / 15000, 0.3, 1);
+        ringPath(r, cf > 7000 ? 14 : cf > 3500 ? 20 : 28);
+        if (cf < 7000) {
+          ctx.strokeStyle = 'rgba(111,224,255,0.2)';
+          ctx.lineWidth = lw * 2.4;
+          ctx.stroke();
+        }
         ctx.strokeStyle = '#6fe0ff';
         ctx.lineWidth = lw;
-        strokePts(pts);
-        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-        ctx.lineWidth = Math.max(1, lw * 0.25);
-        strokePts(pts);
+        ctx.stroke();
+        if (cf < 9000) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+          ctx.lineWidth = Math.max(1, lw * 0.25);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // star glow baked once: opaque-ish core out to 1/7 of the radius, fading to nothing at the edge
+  const starGlow = mk(64, 64);
+  (function () {
+    const g = starGlow.getContext('2d');
+    const sg = g.createRadialGradient(32, 32, 32 * 0.4 / 2.8, 32, 32, 32);
+    sg.addColorStop(0, 'rgba(255,220,80,0.6)');
+    sg.addColorStop(1, 'rgba(255,220,80,0)');
+    g.fillStyle = sg;
+    g.beginPath();
+    g.arc(32, 32, 32, 0, Math.PI * 2);
+    g.fill();
+  })();
+
+  function starShape(R, rot) {
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = rot + (k * Math.PI) / 5 - Math.PI / 2;
+      const rr = k % 2 === 0 ? R : R * 0.45;
+      if (k === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+  }
+
+  // Bonus stars: small glowing gold discs with a star on them; sparkles burst where one was collected.
+  function drawStars(game, clock) {
+    const list = game.world.stars;
+    for (let i = 0; i < list.length; i++) {
+      if (game.starGot[i]) continue;
+      const s = list[i];
+      const q = project(s.x, s.y, s.z);
+      if (!q || q.f > 9000) continue;
+      const R = clamp((s.r * FOCAL) / q.f, 6, 48) * (1 + 0.08 * Math.sin(clock * 5 + i));
+      ctx.save();
+      ctx.translate(q.x, q.y);
+      ctx.rotate(-cam.roll);
+      ctx.drawImage(starGlow, -R * 2.8, -R * 2.8, R * 5.6, R * 5.6);
+      ctx.fillStyle = '#ffcf26';
+      ctx.strokeStyle = 'rgba(120,70,0,0.85)';
+      ctx.lineWidth = Math.max(1.5, R * 0.1);
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fff6c2';
+      starShape(R * 0.78, Math.sin(clock * 2 + i) * 0.25);
+      ctx.fill();
+      ctx.restore();
+    }
+    for (let i = 0; i < game.sparks.length; i++) {
+      const sp = game.sparks[i];
+      const q = project(sp.x, sp.y, sp.z);
+      if (!q) continue;
+      const k = sp.t / 0.8;
+      const sc = FOCAL / q.f;
+      const R = clamp((60 + 300 * k) * sc, 6, 180);
+      ctx.save();
+      ctx.translate(q.x, q.y);
+      ctx.rotate(-cam.roll);
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = '#fff2a0';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = Math.max(2, R * 0.08);
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let j = 0; j < 8; j++) {
+        const a = (j * Math.PI) / 4 + k * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * R * 0.5, Math.sin(a) * R * 0.5);
+        ctx.lineTo(Math.cos(a) * R * 1.15, Math.sin(a) * R * 1.15);
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -464,10 +700,8 @@ export function createRenderer(ctx, world) {
     const bx = b.x;
     const by = b.y;
     const on = game.rings >= RING_COUNT;
-    const g = ctx.createLinearGradient(ax, ay, bx, by);
-    g.addColorStop(0, on ? 'rgba(120,255,200,0.9)' : 'rgba(120,220,255,0.45)');
-    g.addColorStop(1, 'rgba(120,255,220,0)');
-    ctx.strokeStyle = g;
+    ctx.strokeStyle = on ? 'rgba(120,255,200,0.55)' : 'rgba(120,220,255,0.3)';
+    ctx.lineCap = 'butt';
     ctx.lineWidth = on ? 7 : 4;
     ctx.beginPath();
     ctx.moveTo(ax, ay);
@@ -495,18 +729,8 @@ export function createRenderer(ctx, world) {
     const clock = game.clock;
 
     const baseT = ctx.getTransform();
-    ctx.save();
-    ctx.translate(CX, CY);
-    ctx.rotate(-cam.roll);
-    ctx.translate(0, cam.shift);
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(-1700, -1500, 3400, 1500);
-    ctx.fillStyle = FOG_CSS;
-    ctx.fillRect(-1700, 0, 3400, 1700);
-    drawSun();
-    ctx.restore();
 
-    // Terrain layer: march + blit only every 2nd frame into a transparent screen-sized cache;
+    // Static layers (sky, terrain, clouds): rendered only every 2nd frame into a transparent screen-sized cache;
     // other frames just copy the cache 1:1. The very first frame always renders.
     const cw = ctx.canvas.width;
     const ch = ctx.canvas.height;
@@ -527,7 +751,10 @@ export function createRenderer(ctx, world) {
       tctx.rotate(-cam.roll);
       tctx.translate(0, cam.shift);
       tctx.imageSmoothingEnabled = true;
+      drawSky(tctx);
       tctx.drawImage(off, (-BW * BS) / 2, -HB * BS, BW * BS, BH * BS);
+      tctx.setTransform(baseT);
+      drawClouds(tctx);
       tctx.setTransform(1, 0, 0, 1, 0, 0);
       terrainValid = true;
     }
@@ -537,9 +764,9 @@ export function createRenderer(ctx, world) {
     ctx.drawImage(tcache, 0, 0);
     ctx.restore();
 
-    drawClouds();
     drawRunwayBeacon(game);
     drawRings(game, clock);
+    drawStars(game, clock);
 
     if (game.screen === 'crashed') {
       const q = project(plane.x, plane.y + 8, plane.z);
@@ -548,7 +775,7 @@ export function createRenderer(ctx, world) {
     }
     drawShadow(plane);
     const sx = CX + clamp(cam.yaw * FOCAL * 0.9, -170, 170);
-    const sy = 566 - clamp((plane.pitch - cam.pitch) * FOCAL * 0.4, -70, 70);
+    const sy = PLANE_Y - clamp((plane.pitch - cam.pitch) * FOCAL * 0.4, -26, 26);
     drawPlaneSprite(ctx, sx, sy, plane.roll - cam.roll, plane.throttle, clock, plane.grounded);
   }
 

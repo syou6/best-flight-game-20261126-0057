@@ -14,12 +14,15 @@ export const RWY_ALT = 12;
 export const RW_HALF = 80; // runway half width, feet
 export const RING_R = 160;
 export const RING_COUNT = 6;
+export const STAR_COUNT = 5;
 
 const RIVER_HW = 95;
 const RING_AGL = [260, 300, 170, 380, 230, 330]; // ring #3 is the deliberately low one
+const STAR_AGL = [150, 300, 115, 360, 210]; // bonus star heights above the ground
+// Saturated but neighbouring colours stay close in value, so the patchwork reads as fields, not noise.
 const FIELD_COLORS = [
-  [104, 158, 64], [128, 170, 72], [158, 176, 76], [212, 186, 86],
-  [196, 154, 74], [146, 104, 64], [86, 138, 72], [172, 196, 98]
+  [92, 168, 62], [124, 184, 66], [164, 188, 72], [226, 196, 84],
+  [214, 164, 70], [170, 124, 70], [72, 150, 74], [190, 208, 100]
 ];
 
 export function pack(r, g, b) {
@@ -40,14 +43,17 @@ export function runwayColor(rw, x, z) {
   const dz = z - rw.z0;
   const len = rw.z1 - rw.z0;
   const dend = len - dz;
-  if (adx > RW_HALF - 7) return pack(236, 236, 230);
-  if (adx < 70 && ((dz > 24 && dz < 96) || (dend > 24 && dend < 96)) && (Math.floor((dx + 70) / 9) & 1) === 0) {
-    return pack(240, 240, 236);
-  }
-  if (adx < 3.5 && dz > 160 && dend > 160 && (Math.floor(dz / 90) & 1) === 0) return pack(238, 238, 232);
-  if (adx > 22 && adx < 44 && ((dz > 480 && dz < 600) || (dend > 480 && dend < 600))) return pack(232, 232, 226);
-  const n = hash2(5, Math.floor(dz / 16), Math.floor(dx / 16)) * 8;
-  return pack(58 + n, 60 + n, 66 + n);
+  const white = pack(246, 246, 240);
+  if (adx > RW_HALF - 8) return white; // edge lines
+  // threshold bars at both ends
+  if (adx < 68 && ((dz > 22 && dz < 110) || (dend > 22 && dend < 110)) && (Math.floor((dx + 68) / 8.5) & 1) === 0) return white;
+  // centreline dashes
+  if (adx < 4.5 && dz > 170 && dend > 170 && (Math.floor(dz / 60) & 1) === 0) return white;
+  // aiming-point blocks, then touchdown-zone pairs
+  if (adx > 30 && adx < 52 && ((dz > 400 && dz < 490) || (dend > 400 && dend < 490))) return white;
+  if (adx > 18 && adx < 30 && ((dz > 560 && dz < 610) || (dz > 700 && dz < 750) || (dend > 560 && dend < 610) || (dend > 700 && dend < 750))) return white;
+  const n = hash2(5, Math.floor(dz / 24), Math.floor(dx / 24)) * 6;
+  return pack(88 + n, 90 + n, 98 + n);
 }
 
 export function createWorld(seed) {
@@ -131,7 +137,7 @@ export function createWorld(seed) {
 
       const zz = z - 350 * Math.sin(x / 1900);
       const rm = Math.abs(zz - Math.round(zz / 4600) * 4600);
-      const road = dr > 500 && (Math.abs(x - roadCx) < 34 || rm < 30);
+      const road = dr > 500 && (Math.abs(x - roadCx) < 44 || rm < 38);
       const isWater = rd < RIVER_HW;
 
       let r;
@@ -139,19 +145,19 @@ export function createWorld(seed) {
       let b;
       let water = false;
       if (road) {
-        if (isWater) { h = 6; r = 150; g = 148; b = 140; } else { r = 116; g = 114; b = 110; }
+        if (isWater) { h = 6; r = 176; g = 172; b = 162; } else { r = 62; g = 64; b = 72; }
       } else if (isWater) {
-        r = 34; g = 98; b = 160; water = true;
+        r = 20; g = 100; b = 196; water = true;
       } else if (rd < RIVER_HW + 70) {
         r = 206; g = 192; b = 140;
       } else if (h > 900) {
         r = 238; g = 240; b = 248;
       } else if (h > 520) {
-        const v = hash2(seed + 14, ix, iz) * 22;
-        r = 118 + v; g = 114 + v; b = 108 + v;
+        const v = fbm(seed + 14, x / 160, z / 160, 2) * 40;
+        r = 112 + v; g = 108 + v; b = 104 + v;
       } else if (h > 260) {
-        const v = hash2(seed + 15, ix, iz) * 22;
-        r = 34 + v * 0.6; g = 84 + v; b = 46 + v * 0.6;
+        const v = fbm(seed + 15, x / 160, z / 160, 2) * 40;
+        r = 34 + v * 0.6; g = 92 + v; b = 46 + v * 0.6;
       } else {
         const u = x + 260 * Math.sin(z / 950);
         const v = z + 220 * Math.sin(x / 1150 + 1);
@@ -159,13 +165,13 @@ export function createWorld(seed) {
         const fj = Math.floor(v / 520);
         const fh = hash2(seed + 11, fi, fj);
         if (hash2(seed + 13, fi, fj) < 0.2) {
-          const cv = hash2(seed + 16, ix, iz);
-          r = 30 + cv * 20; g = 82 + cv * 30; b = 42 + cv * 16;
-          h += 6 + cv * 14; // canopy bumps
+          const cv = fbm(seed + 16, x / 120, z / 120, 2);
+          r = 26 + cv * 24; g = 92 + cv * 36; b = 40 + cv * 20;
+          h += 6 + fbm(seed + 17, x / 90, z / 90, 2) * 18; // smooth canopy bumps
         } else {
           const c = FIELD_COLORS[Math.floor(fh * FIELD_COLORS.length)];
           const orient = hash2(seed + 12, fi, fj) < 0.5 ? u : v;
-          const m = 0.93 + 0.1 * (Math.sin(orient / 34) * 0.5 + 0.5);
+          const m = 0.95 + 0.08 * (Math.sin(orient / 34) * 0.5 + 0.5);
           r = c[0] * m; g = c[1] * m; b = c[2] * m;
         }
       }
@@ -174,21 +180,22 @@ export function createWorld(seed) {
       if (!road && !water && h < 150 && dr > 600) {
         const od = Math.abs(x - roadCx);
         if (od > 70 && od < 150 && hash2(seed + 21, ix, iz) < 0.03) {
-          r = 176; g = 64; b = 52; h += 9;
+          r = 196; g = 60; b = 48; h += 9;
         }
       }
 
-      // airfield: apron, taxiway, hangars
+      // airfield: apron, taxiway, three bright hangars (readable from the air)
       const lx = x - rwX;
       const lz = z - rz0;
-      if (lx > 100 && lx < 360 && lz > 800 && lz < 1700) { r = 92; g = 94; b = 100; }
-      if (lx > 60 && lx < 360 && Math.abs(lz - 1250) < 40) { r = 88; g = 90; b = 96; }
-      if (lx > 400 && lx < 520) {
-        if (lz > 900 && lz < 1100) { r = 196; g = 72; b = 60; h = RWY_ALT + 30; }
-        else if (lz > 1250 && lz < 1450) { r = 66; g = 108; b = 170; h = RWY_ALT + 30; }
+      if (lx > 100 && lx < 420 && lz > 800 && lz < 1700) { r = 150; g = 152; b = 160; }
+      if (lx > 40 && lx < 420 && Math.abs(lz - 1250) < 46) { r = 138; g = 140; b = 148; }
+      if (lx > 440 && lx < 580) {
+        if (lz > 880 && lz < 1080) { r = 228; g = 66; b = 52; h = RWY_ALT + 40; }
+        else if (lz > 1170 && lz < 1370) { r = 56; g = 118; b = 220; h = RWY_ALT + 40; }
+        else if (lz > 1460 && lz < 1660) { r = 244; g = 200; b = 56; h = RWY_ALT + 40; }
       }
       // paint the runway rectangle itself into the grid too (far LOD)
-      if (Math.abs(lx) < RW_HALF + 8 && lz > -8 && lz < rz1 - rz0 + 8) { r = 64; g = 66; b = 72; }
+      if (Math.abs(lx) < RW_HALF + 8 && lz > -8 && lz < rz1 - rz0 + 8) { r = 92; g = 94; b = 102; }
 
       hgt[i] = h;
       col[i] = water ? packWater(r, g, b) : pack(r, g, b);
@@ -205,9 +212,16 @@ export function createWorld(seed) {
       const he = hgt[iz * GW + ((ix + 1) & GWM)];
       const hs = hgt[(iz - 1) * GW + ix];
       const hn = hgt[(iz + 1) * GW + ix];
-      let sh = 1 + (((he - hw) + (hn - hs) * 0.6) / CELL) * 0.6;
-      sh = sh < 0.62 ? 0.62 : sh > 1.35 ? 1.35 : sh;
-      col[i] = pack((c & 255) * sh, ((c >>> 8) & 255) * sh, ((c >>> 16) & 255) * sh);
+      let sh = 1 + (((he - hw) + (hn - hs) * 0.6) / CELL) * 0.5;
+      sh = sh < 0.7 ? 0.7 : sh > 1.28 ? 1.28 : sh;
+      let r = (c & 255) * sh;
+      let g = ((c >>> 8) & 255) * sh;
+      let b = ((c >>> 16) & 255) * sh;
+      const lum = r * 0.3 + g * 0.59 + b * 0.11; // push colours away from grey: richer, more saturated
+      r = lum + (r - lum) * 1.2;
+      g = lum + (g - lum) * 1.2;
+      b = lum + (b - lum) * 1.2;
+      col[i] = pack(r, g, b);
     }
   }
 
@@ -244,9 +258,26 @@ export function createWorld(seed) {
     rings[i].y = heightAt(rings[i].x, rings[i].z) + RING_AGL[i];
   }
 
+  // bonus stars: one between each pair of consecutive rings, off the direct line, at varied heights
+  const srng = mulberry32(seed * 6151 + 29);
+  const stars = [];
+  for (let k = 0; k < STAR_COUNT; k++) {
+    const a = rings[k];
+    const b = rings[k + 1];
+    const t = 0.35 + srng() * 0.3;
+    const dxk = b.x - a.x;
+    const dzk = b.z - a.z;
+    const len = Math.sqrt(dxk * dxk + dzk * dzk) || 1;
+    const off = (srng() < 0.5 ? -1 : 1) * (280 + srng() * 420);
+    const sx = Math.max(-3600, Math.min(3600, a.x + dxk * t + (dzk / len) * off));
+    const sz = a.z + dzk * t - (dxk / len) * off;
+    stars.push({ i: k, x: sx, y: heightAt(sx, sz) + STAR_AGL[k] + srng() * 40, z: sz, r: 60 });
+  }
+
   return {
     seed: seed,
     hgt: hgt,
+    stars: stars,
     col: col,
     rings: rings,
     runway: runway,

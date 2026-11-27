@@ -9,10 +9,6 @@ export function parseShot(search) {
   return { shot: q.get('shot'), seed: Number.isFinite(seed) ? seed : 1 };
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
 // returns true if the scene name was recognised
 export function stageShot(game, renderer, shot) {
   const w = game.world;
@@ -27,37 +23,44 @@ export function stageShot(game, renderer, shot) {
     game.clock = 5;
     demoPose(game, game.clock + 5);
   } else if (shot === 'flight') {
-    const a = w.rings[3];
-    const b = w.rings[4];
+    // ~1000 ft short of ring 5 (rings[4]), ~110 ft below it, so the ring fills about a third of the frame
+    // and sits above the aircraft, with the runway far ahead
+    const a = w.rings[4];
     game.screen = 'playing';
     game.clock = 3.2;
     game.rings = 4;
-    game.ringScore = 2870;
-    game.score = 2870;
+    game.ringScore = 3420;
+    game.stars = 2;
+    game.starGot[0] = true;
+    game.starGot[1] = true;
+    game.starScore = 300;
+    game.streak = 6;
+    game.score = 3720;
     game.t = 121.4;
-    p.x = lerp(a.x, b.x, 0.55);
-    p.z = lerp(a.z, b.z, 0.55);
-    p.heading = Math.atan2(b.x - p.x, b.z - p.z);
-    p.y = Math.max(lerp(a.y, b.y, 0.55), w.heightAt(p.x, p.z) + 300) + 10;
+    p.heading = a.ang;
+    p.x = a.x - Math.sin(a.ang) * 1000;
+    p.z = a.z - Math.cos(a.ang) * 1000;
+    p.y = Math.max(a.y - 110, w.heightAt(p.x, p.z) + 150);
     p.pitch = 0.03;
-    p.roll = 0.2;
+    p.roll = 0.12;
     p.speed = 246;
     p.throttle = 0.62;
     p.fuel = 41;
     p.vy = 6;
     p.agl = p.y - w.heightAt(p.x, p.z);
-    pushMessage(game, 'RING 4/6   +712   +8 FUEL', 'ring', 3.2);
+    pushMessage(game, 'RING 4/6   +712 x1.5   +8 FUEL', 'ring', 3.2);
   } else if (shot === 'ring') {
     const r = w.rings[2];
     game.screen = 'playing';
     game.clock = 2.4;
     game.rings = 2;
     game.ringScore = 1340;
+    game.streak = 1; // HUD combo x1.25, matching the staged toast below
     game.score = 1340;
     game.t = 84.6;
     p.heading = r.ang;
-    p.x = r.x - Math.sin(r.ang) * 340;
-    p.z = r.z - Math.cos(r.ang) * 340;
+    p.x = r.x - Math.sin(r.ang) * 480;
+    p.z = r.z - Math.cos(r.ang) * 480;
     p.y = r.y - 18;
     p.pitch = 0.02;
     p.roll = 0.1;
@@ -65,11 +68,16 @@ export function stageShot(game, renderer, shot) {
     p.throttle = 0.64;
     p.fuel = 62;
     p.agl = p.y - w.heightAt(p.x, p.z);
-    pushMessage(game, 'RING 2/6   +684   +8 FUEL', 'ring', 3.2);
+    pushMessage(game, 'RING 2/6   +684 x1.25   +8 FUEL', 'ring', 3.2);
   } else if (shot === 'landed') {
     game.clock = 4;
     game.rings = 6;
     game.ringScore = 3980;
+    game.stars = 3;
+    game.starGot[0] = true;
+    game.starGot[2] = true;
+    game.starGot[3] = true;
+    game.starScore = 450;
     game.t = 171.4;
     p.x = rw.x + 4;
     p.z = rw.z0 + 600;

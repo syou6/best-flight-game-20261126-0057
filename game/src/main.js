@@ -81,6 +81,7 @@ function drainEvents() {
   for (let i = 0; i < game.events.length; i++) {
     const e = game.events[i];
     if (e.type === 'ring') chime(e.n);
+    else if (e.type === 'star') chime(3 + e.n);
     else if (e.type === 'land') fanfare();
     else if (e.type === 'crash') crashSound();
   }

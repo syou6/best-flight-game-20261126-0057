@@ -2,8 +2,8 @@
 // throttle and fuel gauges, artificial horizon, target marker, warnings and message toasts.
 
 import { angDiff, clamp, KT, FT_PER_NM, TAU } from './physics.js';
-import { RING_COUNT } from './terrain.js';
-import { targetOf } from './mission.js';
+import { RING_COUNT, STAR_COUNT } from './terrain.js';
+import { targetOf, comboMult, multText } from './mission.js';
 
 const MONO = '"Consolas","Menlo","DejaVu Sans Mono","Courier New",monospace';
 const SANS = '"Segoe UI","Helvetica Neue",Arial,sans-serif';
@@ -110,6 +110,10 @@ function drawCompass(ctx, hdgDeg, relTargetDeg) {
   text(ctx, pad(hdgDeg, 3) + '°', cx, y0 + h + 29, 22, '#eaf8ff', 'center', true);
 }
 
+let horizonGrads = null;
+let horizonR = 0;
+const HORIZON_TICKS = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60];
+
 function drawHorizon(ctx, cx, cy, R, pitch, roll) {
   ctx.save();
   ctx.beginPath();
@@ -118,16 +122,24 @@ function drawHorizon(ctx, cx, cy, R, pitch, roll) {
   ctx.translate(cx, cy);
   ctx.rotate(-roll);
   const off = pitch * DEG * 2.3;
-  const sky = ctx.createLinearGradient(0, -R * 2 + off, 0, off);
-  sky.addColorStop(0, '#1f63c8');
-  sky.addColorStop(1, '#68b4f0');
-  ctx.fillStyle = sky;
-  ctx.fillRect(-R * 2, -R * 3 + off, R * 4, R * 3);
-  const gnd = ctx.createLinearGradient(0, off, 0, off + R * 2);
-  gnd.addColorStop(0, '#a56f35');
-  gnd.addColorStop(1, '#5b3a1b');
-  ctx.fillStyle = gnd;
-  ctx.fillRect(-R * 2, off, R * 4, R * 3);
+  if (!horizonGrads || horizonR !== R) {
+    // gradients are defined relative to the horizon line (y = 0), so they never change per frame
+    horizonR = R;
+    const sky = ctx.createLinearGradient(0, -R * 2, 0, 0);
+    sky.addColorStop(0, '#1f63c8');
+    sky.addColorStop(1, '#68b4f0');
+    const gnd = ctx.createLinearGradient(0, 0, 0, R * 2);
+    gnd.addColorStop(0, '#a56f35');
+    gnd.addColorStop(1, '#5b3a1b');
+    horizonGrads = { sky: sky, gnd: gnd };
+  }
+  ctx.save();
+  ctx.translate(0, off);
+  ctx.fillStyle = horizonGrads.sky;
+  ctx.fillRect(-R * 2, -R * 3, R * 4, R * 3);
+  ctx.fillStyle = horizonGrads.gnd;
+  ctx.fillRect(-R * 2, 0, R * 4, R * 3);
+  ctx.restore();
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -155,16 +167,18 @@ function drawHorizon(ctx, cx, cy, R, pitch, roll) {
   ctx.restore();
 
   // fixed bezel, roll ticks and aircraft symbol
-  ctx.save();
-  ctx.shadowColor = 'rgba(110,210,255,0.9)';
-  ctx.shadowBlur = 14;
-  ctx.strokeStyle = '#8fdcff';
-  ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.arc(cx, cy, R + 2, 0, TAU);
+  ctx.strokeStyle = 'rgba(110,210,255,0.16)';
+  ctx.lineWidth = 16;
   ctx.stroke();
-  ctx.restore();
-  const ticks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60];
+  ctx.strokeStyle = 'rgba(110,210,255,0.3)';
+  ctx.lineWidth = 9;
+  ctx.stroke();
+  ctx.strokeStyle = '#8fdcff';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  const ticks = HORIZON_TICKS;
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 2;
   for (let i = 0; i < ticks.length; i++) {
@@ -201,16 +215,30 @@ function drawTargetMarker(ctx, g, rend, tgt, rb, dist, distText) {
   if (q && q.x > 70 && q.x < 1210 && q.y > 130 && q.y < 640 && Math.abs(rb) < 1.3) {
     const x = q.x;
     const y = q.y;
-    ctx.strokeStyle = '#ffd23a';
-    ctx.lineWidth = 3;
+    const s = 28 + 3 * Math.sin(g.clock * 6); // big pulsing diamond, readable from far away
     ctx.beginPath();
-    ctx.moveTo(x, y - 17);
-    ctx.lineTo(x + 17, y);
-    ctx.lineTo(x, y + 17);
-    ctx.lineTo(x - 17, y);
+    ctx.moveTo(x, y - s);
+    ctx.lineTo(x + s, y);
+    ctx.lineTo(x, y + s);
+    ctx.lineTo(x - s, y);
     ctx.closePath();
+    ctx.fillStyle = 'rgba(255,214,60,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,214,60,0.25)';
+    ctx.lineWidth = 15;
     ctx.stroke();
-    text(ctx, tgt.label + '  ' + distText, x, y - 26, 16, '#ffe9a0', 'center', true);
+    ctx.strokeStyle = '#ffe566';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.fillStyle = '#fff6b8';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 9);
+    ctx.lineTo(x + 9, y);
+    ctx.lineTo(x, y + 9);
+    ctx.lineTo(x - 9, y);
+    ctx.closePath();
+    ctx.fill();
+    text(ctx, tgt.label + '  ' + distText, x, y - s - 12, 19, '#fff0b0', 'center', true);
     return;
   }
   if (p.grounded) return;
@@ -295,16 +323,19 @@ export function drawHUD(ctx, g, rend) {
   // floating top bar (score/rings, time, compass) is hidden under the mission-complete overlay
   if (g.screen !== 'complete') {
   // top-left: score + ring progress
-  panel(ctx, 24, 18, 300, 92);
+  panel(ctx, 24, 18, 300, 118);
   text(ctx, 'SCORE', 42, 44, 14, '#8fdcff', 'left', false);
   text(ctx, pad(g.score, 5), 42, 84, 38, '#ffffff', 'left', true);
+  const mult = comboMult(g);
+  text(ctx, 'COMBO ' + multText(mult), 42, 114, 16, mult > 1 ? '#ffd23a' : '#8fb4c8', 'left', true);
   for (let i = 0; i < RING_COUNT; i++) {
     const x = 200 + i * 20;
     ctx.beginPath();
     ctx.arc(x, 56, 7, 0, TAU);
     if (i < g.rings) { ctx.fillStyle = '#ffd23a'; ctx.fill(); } else { ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2; ctx.stroke(); }
   }
-  text(ctx, 'RINGS ' + g.rings + '/' + RING_COUNT, 200, 90, 15, '#dff3ff', 'left', true);
+  text(ctx, 'RINGS ' + g.rings + '/' + RING_COUNT, 200, 88, 15, '#dff3ff', 'left', true);
+  text(ctx, 'STARS ' + g.stars + '/' + STAR_COUNT, 200, 114, 15, g.stars > 0 ? '#ffd23a' : '#dff3ff', 'left', true);
 
   // top-right: timer
   panel(ctx, 956, 18, 300, 92);

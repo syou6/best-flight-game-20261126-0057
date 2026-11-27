@@ -1,9 +1,20 @@
 // Mission rules: screens/state machine, ring detection, messages, scoring, landing result.
 
 import { createPlane, stepPlane, KT } from './physics.js';
-import { RING_COUNT } from './terrain.js';
+import { RING_COUNT, STAR_COUNT } from './terrain.js';
 
 const BEST_KEY = 'skyhook-run-best';
+export const STAR_BONUS = 150;
+const STAR_PICK = 95; // pickup radius, feet
+
+// Ring combo: rings (and stars) collected in a row without a miss raise the ring bonus multiplier.
+export function comboMult(g) {
+  return g.streak >= 2 ? 1.5 : g.streak === 1 ? 1.25 : 1;
+}
+
+export function multText(m) {
+  return 'x' + (m === 1 ? '1.0' : String(m));
+}
 
 export function newGame(world, persist) {
   const g = {
@@ -32,6 +43,12 @@ export function resetFlight(g) {
   g.t = 0;
   g.rings = 0;
   g.ringScore = 0;
+  g.stars = 0;
+  g.starGot = [];
+  for (let i = 0; i < STAR_COUNT; i++) g.starGot.push(false);
+  g.starScore = 0;
+  g.streak = 0;
+  g.sparks = [];
   g.score = 0;
   g.messages = [];
   g.crashReason = '';
@@ -75,6 +92,10 @@ export function updateGame(g, inp, dt) {
     g.messages[i].life -= dt;
     if (g.messages[i].life <= 0) g.messages.splice(i, 1);
   }
+  for (let i = g.sparks.length - 1; i >= 0; i--) {
+    g.sparks[i].t += dt;
+    if (g.sparks[i].t > 0.8) g.sparks.splice(i, 1);
+  }
   if (g.screen === 'title') {
     demoPose(g, g.clock + 5);
     return;
@@ -92,7 +113,8 @@ export function updateGame(g, inp, dt) {
   const pz = p.z;
   const res = stepPlane(p, inp, dt, g.world);
   checkRing(g, px, py, pz);
-  g.score = g.ringScore;
+  checkStars(g, px, py, pz);
+  g.score = g.ringScore + g.starScore;
 
   if (res.crash) {
     crash(g, p.engineOut ? 'Out of fuel - the engine quit. ' + res.crash : res.crash);
@@ -137,20 +159,55 @@ function checkRing(g, px, py, pz) {
     const iz = pz + (p.z - pz) * t;
     const d = Math.sqrt((ix - r.x) * (ix - r.x) + (iy - r.y) * (iy - r.y) + (iz - r.z) * (iz - r.z));
     if (d <= r.r * 1.08) {
-      const bonus = 500 + Math.max(0, Math.round((1 - d / r.r) * 250));
+      const mult = comboMult(g);
+      const bonus = Math.round((500 + Math.max(0, Math.round((1 - d / r.r) * 250))) * mult);
       g.ringScore += bonus;
+      g.streak++;
       g.rings++;
       p.fuel = Math.min(100, p.fuel + 8);
       if (p.fuel > 0) p.engineOut = false;
       g.flags.engine = false;
       g.events.push({ type: 'ring', n: g.rings });
       const tag = d < r.r * 0.35 ? 'BULLSEYE  ' : '';
-      pushMessage(g, tag + 'RING ' + g.rings + '/' + RING_COUNT + '   +' + bonus + '   +8 FUEL', 'ring', 3);
+      pushMessage(g, tag + 'RING ' + g.rings + '/' + RING_COUNT + '   +' + bonus + ' ' + multText(mult) + '   +8 FUEL', 'ring', 3);
       if (g.rings >= RING_COUNT) pushMessage(g, 'ALL RINGS! LAND ON THE RUNWAY', 'good', 5);
     } else if (g.missNote !== g.rings) {
       g.missNote = g.rings;
-      pushMessage(g, 'MISSED RING ' + (g.rings + 1) + ' - TURN BACK', 'warn', 3);
+      const hadCombo = g.streak > 0;
+      g.streak = 0;
+      pushMessage(g, 'MISSED RING ' + (g.rings + 1) + ' - TURN BACK' + (hadCombo ? '  (COMBO LOST)' : ''), 'warn', 3);
     }
+  }
+}
+
+// Bonus stars: collected when the plane's path this frame passes within STAR_PICK of one.
+function checkStars(g, px, py, pz) {
+  const p = g.plane;
+  const stars = g.world.stars;
+  const ay = py + 5;
+  const dx = p.x - px;
+  const dy = p.y - py;
+  const dz = p.z - pz;
+  const len2 = dx * dx + dy * dy + dz * dz;
+  for (let i = 0; i < stars.length; i++) {
+    if (g.starGot[i]) continue;
+    const s = stars[i];
+    let t = len2 > 1e-6 ? ((s.x - px) * dx + (s.y - ay) * dy + (s.z - pz) * dz) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = px + dx * t - s.x;
+    const qy = ay + dy * t - s.y;
+    const qz = pz + dz * t - s.z;
+    if (qx * qx + qy * qy + qz * qz > STAR_PICK * STAR_PICK) continue;
+    g.starGot[i] = true;
+    g.stars++;
+    g.starScore += STAR_BONUS;
+    g.streak++; // a star keeps the combo alive and counts as a link in the chain
+    p.fuel = Math.min(100, p.fuel + 2);
+    if (p.fuel > 0) p.engineOut = false;
+    g.flags.engine = false;
+    g.sparks.push({ x: s.x, y: s.y, z: s.z, t: 0 });
+    g.events.push({ type: 'star', n: g.stars });
+    pushMessage(g, 'STAR ' + g.stars + '/' + STAR_COUNT + '   +' + STAR_BONUS + '   +2 FUEL', 'ring', 2.6);
   }
 }
 
@@ -160,7 +217,7 @@ function crash(g, reason) {
   g.crashT = 0;
   g.plane.crashed = true;
   g.plane.speed = 0;
-  g.score = g.ringScore;
+  g.score = g.ringScore + g.starScore;
   g.events.push({ type: 'crash' });
 }
 
@@ -172,12 +229,14 @@ export function finishMission(g) {
   const center = Math.round(Math.max(0, 1 - Math.abs(td.offset) / 70) * 300);
   const landing = 1000 + smooth + center;
   const fuelBonus = Math.round(p.fuel) * 8;
-  const total = g.ringScore + timeBonus + landing + fuelBonus;
+  const total = g.ringScore + g.starScore + timeBonus + landing + fuelBonus;
   const grade = total >= 9000 ? 'S' : total >= 7500 ? 'A' : total >= 6000 ? 'B' : 'C';
   const newBest = total > g.best;
   g.result = {
     rings: g.rings,
     ringScore: g.ringScore,
+    stars: g.stars,
+    starScore: g.starScore,
     timeBonus: timeBonus,
     landing: landing,
     smooth: smooth,
